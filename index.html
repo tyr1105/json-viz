@@ -1,0 +1,901 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>JSONViz — JSON Visualizer &amp; Tree Viewer</title>
+<meta name="description" content="JSONViz is a free, client-side JSON visualizer and tree viewer. Paste JSON data and explore it as an interactive tree diagram with search, filter, and export capabilities.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🌳</text></svg>">
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#0a0a0b;--surface:#141416;--surface2:#1c1c1f;--surface3:#242428;
+  --accent:#6d5aff;--accent-dim:rgba(109,90,255,0.15);--accent-hover:#8574ff;
+  --text:#e4e4e7;--text-dim:#8b8b8f;--text-muted:#55555a;
+  --border:#2a2a2e;--error:#ff4d4d;--error-dim:rgba(255,77,77,0.12);
+  --success:#4dff7c;--warning:#ffc44d;
+  --radius:8px;--radius-sm:5px;
+  --font-mono:'SF Mono','Cascadia Code','Fira Code','JetBrains Mono',Consolas,monospace;
+  --font-sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  --shadow:0 2px 12px rgba(0,0,0,0.4);
+}
+html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--font-sans);overflow:hidden}
+button{font-family:var(--font-sans);cursor:pointer;border:none;background:none;color:var(--text);font-size:13px}
+input{font-family:var(--font-sans)}
+
+/* ── Layout ── */
+#app{display:flex;flex-direction:column;height:100vh}
+header{
+  display:flex;align-items:center;gap:12px;padding:10px 16px;
+  background:var(--surface);border-bottom:1px solid var(--border);
+  flex-shrink:0;z-index:10;
+}
+.logo{font-size:18px;font-weight:700;letter-spacing:-0.5px;white-space:nowrap}
+.logo span{color:var(--accent)}
+.toolbar{display:flex;align-items:center;gap:6px;margin-left:auto;flex-wrap:wrap}
+.toolbar .sep{width:1px;height:20px;background:var(--border);margin:0 4px}
+
+.btn{
+  display:inline-flex;align-items:center;gap:5px;padding:6px 12px;
+  border-radius:var(--radius-sm);background:var(--surface2);
+  border:1px solid var(--border);transition:all .15s;font-size:12px;font-weight:500;
+}
+.btn:hover{background:var(--surface3);border-color:var(--text-muted)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn.primary:hover{background:var(--accent-hover)}
+.btn svg{width:14px;height:14px;flex-shrink:0}
+
+.main{display:flex;flex:1;overflow:hidden;position:relative}
+
+/* ── Editor Panel ── */
+.panel-editor{
+  width:45%;min-width:280px;display:flex;flex-direction:column;
+  border-right:1px solid var(--border);position:relative;background:var(--bg);
+}
+.editor-header{
+  display:flex;align-items:center;padding:8px 14px;gap:8px;
+  background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0;
+}
+.editor-header .label{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--text-dim);font-weight:600}
+.editor-header .status{margin-left:auto;font-size:11px;font-weight:500;padding:2px 8px;border-radius:10px}
+.status.valid{background:rgba(77,255,124,0.12);color:var(--success)}
+.status.invalid{background:var(--error-dim);color:var(--error)}
+.status.empty{background:rgba(139,139,143,0.12);color:var(--text-dim)}
+
+.editor-wrap{flex:1;position:relative;overflow:hidden}
+#editor{
+  width:100%;height:100%;resize:none;border:none;outline:none;
+  background:var(--bg);color:var(--text);font-family:var(--font-mono);
+  font-size:13px;line-height:1.6;padding:14px 16px;tab-size:2;
+  white-space:pre;overflow:auto;
+}
+#editor::selection{background:var(--accent-dim)}
+#editor::-webkit-scrollbar{width:8px;height:8px}
+#editor::-webkit-scrollbar-track{background:transparent}
+#editor::-webkit-scrollbar-thumb{background:var(--surface3);border-radius:4px}
+#editor::-webkit-scrollbar-thumb:hover{background:var(--text-muted)}
+
+.error-bar{
+  display:none;padding:6px 14px;background:var(--error-dim);color:var(--error);
+  font-size:12px;font-family:var(--font-mono);border-top:1px solid rgba(255,77,77,0.2);
+  flex-shrink:0;max-height:60px;overflow:auto;
+}
+.error-bar.show{display:block}
+
+/* ── Tree Panel ── */
+.panel-tree{
+  flex:1;display:flex;flex-direction:column;overflow:hidden;background:var(--bg);
+}
+.tree-toolbar{
+  display:flex;align-items:center;gap:6px;padding:8px 14px;
+  background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0;
+}
+.tree-toolbar .label{font-size:11px;text-transform:uppercase;letter-spacing:1px;color:var(--text-dim);font-weight:600}
+.search-wrap{
+  position:relative;margin-left:auto;display:flex;align-items:center;
+}
+.search-wrap svg{position:absolute;left:8px;color:var(--text-muted);width:14px;height:14px}
+#searchInput{
+  background:var(--surface2);border:1px solid var(--border);color:var(--text);
+  padding:5px 10px 5px 28px;border-radius:var(--radius-sm);font-size:12px;
+  width:200px;outline:none;transition:border .15s;
+}
+#searchInput:focus{border-color:var(--accent)}
+#searchInput::placeholder{color:var(--text-muted)}
+.search-count{font-size:11px;color:var(--text-dim);margin-left:6px;white-space:nowrap}
+
+.tree-viewport{
+  flex:1;overflow:auto;position:relative;padding:20px;
+}
+.tree-viewport::-webkit-scrollbar{width:8px;height:8px}
+.tree-viewport::-webkit-scrollbar-track{background:transparent}
+.tree-viewport::-webkit-scrollbar-thumb{background:var(--surface3);border-radius:4px}
+
+.tree-container{position:relative;display:inline-block;min-width:100%;min-height:100%}
+
+/* ── Path Tooltip ── */
+.path-tooltip{
+  position:fixed;padding:4px 10px;background:var(--surface3);color:var(--accent);
+  font-family:var(--font-mono);font-size:11px;border-radius:var(--radius-sm);
+  pointer-events:none;z-index:100;display:none;white-space:nowrap;
+  border:1px solid var(--border);box-shadow:var(--shadow);
+}
+
+/* ── Tree Nodes ── */
+.tree-node{
+  position:relative;display:flex;flex-direction:column;align-items:flex-start;
+  margin-left:0;
+}
+.tree-node .node-row{
+  display:inline-flex;align-items:center;gap:6px;padding:3px 8px;
+  border-radius:var(--radius-sm);cursor:default;transition:background .1s;
+  position:relative;
+}
+.tree-node .node-row:hover{background:var(--surface2)}
+.tree-node .node-row.highlighted{background:var(--accent-dim);outline:1px solid rgba(109,90,255,0.3)}
+.tree-node .node-row.search-match{background:rgba(255,196,77,0.15);outline:1px solid rgba(255,196,77,0.4)}
+
+.toggle-btn{
+  width:16px;height:16px;display:flex;align-items:center;justify-content:center;
+  border-radius:3px;background:var(--surface3);color:var(--text-dim);
+  font-size:10px;cursor:pointer;transition:all .15s;flex-shrink:0;
+  border:1px solid var(--border);
+}
+.toggle-btn:hover{background:var(--accent);color:#fff;border-color:var(--accent)}
+.toggle-btn.collapsed{transform:rotate(-90deg)}
+
+.node-key{color:var(--accent);font-family:var(--font-mono);font-size:12px;font-weight:600}
+.node-colon{color:var(--text-muted);font-family:var(--font-mono);font-size:12px}
+.node-value{font-family:var(--font-mono);font-size:12px}
+.node-value.string{color:#a5d6a7}
+.node-value.number{color:#ffcc80}
+.node-value.boolean{color:#80cbc4}
+.node-value.null-val{color:#ef9a9a;font-style:italic}
+.node-bracket{color:var(--text-muted);font-family:var(--font-mono);font-size:12px}
+.node-count{color:var(--text-muted);font-size:10px;font-family:var(--font-mono)}
+
+.node-children{
+  margin-left:20px;padding-left:12px;
+  border-left:1px solid var(--border);
+  position:relative;
+}
+.node-children.collapsed{display:none}
+
+/* ── Empty State ── */
+.empty-state{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  height:100%;color:var(--text-muted);text-align:center;padding:40px;
+}
+.empty-state svg{width:64px;height:64px;margin-bottom:16px;opacity:0.3}
+.empty-state h3{font-size:16px;margin-bottom:6px;color:var(--text-dim)}
+.empty-state p{font-size:13px;max-width:280px;line-height:1.5}
+
+/* ── Resizer ── */
+.resizer{
+  width:5px;cursor:col-resize;background:transparent;
+  position:relative;z-index:5;flex-shrink:0;
+  transition:background .15s;
+}
+.resizer:hover,.resizer.active{background:var(--accent)}
+.resizer::after{
+  content:'';position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+  width:2px;height:30px;background:var(--text-muted);border-radius:2px;opacity:0;
+  transition:opacity .15s;
+}
+.resizer:hover::after{opacity:1}
+
+/* ── Toast ── */
+.toast{
+  position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(20px);
+  padding:10px 20px;background:var(--surface3);color:var(--text);
+  border-radius:var(--radius);border:1px solid var(--border);
+  box-shadow:var(--shadow);font-size:13px;z-index:200;
+  opacity:0;transition:all .25s;pointer-events:none;
+}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+/* ── Mobile ── */
+.mobile-tabs{display:none}
+@media(max-width:768px){
+  .toolbar .btn span.btn-label{display:none}
+  .toolbar .sep{display:none}
+  .search-wrap{margin-left:0;width:100%}
+  #searchInput{width:100%}
+  .panel-editor{width:100%;border-right:none}
+  .panel-tree{display:none}
+  .resizer{display:none}
+  .mobile-tabs{display:flex;gap:0;width:100%}
+  .mobile-tabs button{
+    flex:1;padding:10px;background:var(--surface);color:var(--text-dim);
+    font-size:13px;font-weight:600;border-bottom:2px solid transparent;
+  }
+  .mobile-tabs button.active{color:var(--accent);border-bottom-color:var(--accent)}
+  .main.mobile-tree .panel-editor{display:none}
+  .main.mobile-tree .panel-tree{display:flex}
+  .main.mobile-tree .resizer{display:none}
+  header{flex-wrap:wrap}
+  .toolbar{width:100%;justify-content:flex-start;margin-left:0;margin-top:6px}
+}
+
+/* ── Export overlay ── */
+.export-overlay{
+  position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);
+  z-index:150;display:flex;align-items:center;justify-content:center;
+}
+.export-overlay .modal{
+  background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);
+  padding:24px;max-width:500px;width:90%;text-align:center;
+}
+.export-overlay .modal h3{margin-bottom:12px;font-size:16px}
+.export-overlay .modal canvas{max-width:100%;border-radius:var(--radius-sm);margin:12px 0;border:1px solid var(--border)}
+.export-overlay .modal .btn-row{display:flex;gap:8px;justify-content:center;margin-top:12px}
+
+/* Animations */
+@keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
+.tree-node{animation:fadeIn .15s ease}
+</style>
+</head>
+<body>
+
+<div id="app">
+  <!-- Mobile Tabs -->
+  <div class="mobile-tabs" id="mobileTabs">
+    <button class="active" data-tab="editor" onclick="switchMobileTab('editor')">Editor</button>
+    <button data-tab="tree" onclick="switchMobileTab('tree')">Tree View</button>
+  </div>
+
+  <!-- Header -->
+  <header>
+    <div class="logo">JSON<span>Viz</span></div>
+    <div class="toolbar">
+      <button class="btn primary" onclick="visualize()" title="Visualize JSON (Ctrl+Enter)">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 12H3m0 0l4-4m-4 4l4 4"/><path d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+        <span class="btn-label">Visualize</span>
+      </button>
+      <div class="sep"></div>
+      <button class="btn" onclick="beautify()" title="Beautify JSON">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 7h16M4 12h10M4 17h6"/></svg>
+        <span class="btn-label">Beautify</span>
+      </button>
+      <button class="btn" onclick="minify()" title="Minify JSON">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 12h16"/></svg>
+        <span class="btn-label">Minify</span>
+      </button>
+      <div class="sep"></div>
+      <button class="btn" onclick="copyJSON()" title="Copy JSON">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+        <span class="btn-label">Copy</span>
+      </button>
+      <button class="btn" onclick="exportPNG()" title="Export Tree as PNG">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
+        <span class="btn-label">Export PNG</span>
+      </button>
+      <button class="btn" onclick="clearAll()" title="Clear">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+        <span class="btn-label">Clear</span>
+      </button>
+      <div class="sep"></div>
+      <button class="btn" onclick="loadSample()" title="Load Sample JSON">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6M12 18v-6M9 15h6"/></svg>
+        <span class="btn-label">Sample</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Main -->
+  <div class="main" id="mainArea">
+    <div class="panel-editor" id="panelEditor">
+      <div class="editor-header">
+        <span class="label">Editor</span>
+        <span class="status empty" id="status">Empty</span>
+      </div>
+      <div class="editor-wrap">
+        <textarea id="editor" spellcheck="false" placeholder="Paste or type JSON here...&#10;&#10;Press Ctrl+Enter to visualize"></textarea>
+      </div>
+      <div class="error-bar" id="errorBar"></div>
+    </div>
+
+    <div class="resizer" id="resizer"></div>
+
+    <div class="panel-tree" id="panelTree">
+      <div class="tree-toolbar">
+        <span class="label">Tree View</span>
+        <div class="search-wrap">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+          <input type="text" id="searchInput" placeholder="Search nodes..." oninput="searchTree(this.value)">
+          <span class="search-count" id="searchCount"></span>
+        </div>
+        <button class="btn" onclick="expandAll()" title="Expand All" style="margin-left:6px">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 9l6 6 6-6"/></svg>
+        </button>
+        <button class="btn" onclick="collapseAll()" title="Collapse All">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 15l-6-6-6 6"/></svg>
+        </button>
+      </div>
+      <div class="tree-viewport" id="treeViewport">
+        <div class="tree-container" id="treeContainer"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Path Tooltip -->
+<div class="path-tooltip" id="pathTooltip"></div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script>
+// ── State ──
+let currentJSON = null;
+let allNodes = [];
+let searchMatches = [];
+
+const editor = document.getElementById('editor');
+const treeContainer = document.getElementById('treeContainer');
+const statusEl = document.getElementById('status');
+const errorBar = document.getElementById('errorBar');
+const pathTooltip = document.getElementById('pathTooltip');
+const searchInput = document.getElementById('searchInput');
+const searchCountEl = document.getElementById('searchCount');
+
+// ── Sample Data ──
+const sampleData = {
+  "project": "JSONViz",
+  "version": "1.0.0",
+  "description": "A powerful JSON visualizer and tree viewer",
+  "features": [
+    "Interactive tree visualization",
+    "Search and filter nodes",
+    "Beautify and minify JSON",
+    "Export as PNG",
+    "JSON path display",
+    "Dark theme"
+  ],
+  "author": {
+    "name": "Developer",
+    "github": "https://github.com/example",
+    "skills": ["JavaScript", "HTML", "CSS", "Node.js"]
+  },
+  "settings": {
+    "theme": "dark",
+    "autoVisualize": true,
+    "maxDepth": null,
+    "fontSize": 14,
+    "plugins": [
+      {"name": "syntax-highlighter", "active": true},
+      {"name": "auto-format", "active": false}
+    ]
+  },
+  "stats": {
+    "downloads": 15420,
+    "stars": 892,
+    "forks": 134,
+    "contributors": [
+      {"username": "alice", "commits": 47},
+      {"username": "bob", "commits": 23},
+      {"username": "charlie", "commits": 15}
+    ]
+  },
+  "published": true,
+  "tags": ["json", "visualizer", "developer-tools", "open-source"]
+};
+
+// ── Init ──
+function init() {
+  setupResizer();
+  setupKeyboard();
+  setupTooltip();
+  editor.addEventListener('input', onEditorChange);
+}
+
+function onEditorChange() {
+  const val = editor.value.trim();
+  if (!val) {
+    setStatus('empty', 'Empty');
+    hideError();
+    return;
+  }
+  try {
+    JSON.parse(val);
+    setStatus('valid', 'Valid JSON');
+    hideError();
+  } catch (e) {
+    setStatus('invalid', 'Invalid');
+    showError(e.message);
+  }
+}
+
+function setStatus(type, text) {
+  statusEl.className = 'status ' + type;
+  statusEl.textContent = text;
+}
+
+function showError(msg) {
+  errorBar.textContent = msg;
+  errorBar.classList.add('show');
+}
+
+function hideError() {
+  errorBar.classList.remove('show');
+  errorBar.textContent = '';
+}
+
+// ── Visualize ──
+function visualize() {
+  const val = editor.value.trim();
+  if (!val) {
+    toast('Editor is empty. Paste some JSON first.');
+    return;
+  }
+  try {
+    currentJSON = JSON.parse(val);
+    hideError();
+    setStatus('valid', 'Valid JSON');
+    renderTree(currentJSON);
+  } catch (e) {
+    setStatus('invalid', 'Invalid');
+    showError(e.message);
+    toast('Invalid JSON: ' + e.message);
+  }
+}
+
+// ── Tree Rendering ──
+function renderTree(data) {
+  allNodes = [];
+  treeContainer.innerHTML = '';
+  const el = buildNode(data, '$', null, 0);
+  if (el) {
+    treeContainer.appendChild(el);
+  }
+  // Remove empty state if it exists
+  const empty = treeContainer.querySelector('.empty-state');
+  if (empty) empty.remove();
+}
+
+function buildNode(value, path, key, depth) {
+  const node = document.createElement('div');
+  node.className = 'tree-node';
+  node.dataset.path = path;
+
+  if (value === null) {
+    const row = makeRow(path, key, 'null');
+    node.appendChild(row);
+    allNodes.push({ el: row, path, value, type: 'null' });
+    return node;
+  }
+
+  if (Array.isArray(value)) {
+    const row = document.createElement('div');
+    row.className = 'node-row';
+    row.dataset.path = path;
+    const toggle = makeToggle();
+    row.appendChild(toggle);
+    if (key !== null) row.appendChild(makeKey(key));
+    const bracket = document.createElement('span');
+    bracket.className = 'node-bracket';
+    bracket.textContent = `[${value.length}]`;
+    row.appendChild(bracket);
+    node.appendChild(row);
+
+    const children = document.createElement('div');
+    children.className = 'node-children';
+    value.forEach(function(item, i) {
+      const child = buildNode(item, path + '[' + i + ']', null, depth + 1);
+      children.appendChild(child);
+    });
+
+    node.appendChild(children);
+    allNodes.push({ el: row, path, value, type: 'array' });
+
+    toggle.addEventListener('click', function(e) {
+      e.stopPropagation();
+      toggleNode(toggle, children);
+    });
+
+    return node;
+  }
+
+  if (typeof value === 'object') {
+    const keys = Object.keys(value);
+    const row = document.createElement('div');
+    row.className = 'node-row';
+    row.dataset.path = path;
+    const toggle = makeToggle();
+    row.appendChild(toggle);
+    if (key !== null) row.appendChild(makeKey(key));
+    const bracket = document.createElement('span');
+    bracket.className = 'node-bracket';
+    bracket.textContent = '{' + keys.length + '}';
+    row.appendChild(bracket);
+    node.appendChild(row);
+
+    const children = document.createElement('div');
+    children.className = 'node-children';
+    keys.forEach(function(k) {
+      const child = buildNode(value[k], path + '.' + escapeKey(k), k, depth + 1);
+      children.appendChild(child);
+    });
+
+    node.appendChild(children);
+    allNodes.push({ el: row, path, value, type: 'object' });
+
+    toggle.addEventListener('click', function(e) {
+      e.stopPropagation();
+      toggleNode(toggle, children);
+    });
+
+    return node;
+  }
+
+  // Primitives
+  const type = typeof value;
+  const row = makeRow(path, key, type, value);
+  node.appendChild(row);
+  allNodes.push({ el: row, path, value, type });
+  return node;
+}
+
+function makeRow(path, key, type, value) {
+  const row = document.createElement('div');
+  row.className = 'node-row';
+  row.dataset.path = path;
+  if (key !== null) row.appendChild(makeKey(key));
+  if (type !== null) {
+    const valEl = document.createElement('span');
+    valEl.className = 'node-value ' + (type === 'null' ? 'null-val' : type);
+    if (type === 'string') {
+      valEl.textContent = '"' + escapeHTML(String(value)) + '"';
+    } else if (type === 'null') {
+      valEl.textContent = 'null';
+    } else {
+      valEl.textContent = String(value);
+    }
+    row.appendChild(valEl);
+  }
+  return row;
+}
+
+function makeKey(key) {
+  const frag = document.createDocumentFragment();
+  const keyEl = document.createElement('span');
+  keyEl.className = 'node-key';
+  keyEl.textContent = key;
+  const colon = document.createElement('span');
+  colon.className = 'node-colon';
+  colon.textContent = ': ';
+  frag.appendChild(keyEl);
+  frag.appendChild(colon);
+  return frag;
+}
+
+function makeToggle() {
+  const btn = document.createElement('button');
+  btn.className = 'toggle-btn';
+  btn.innerHTML = '&#9660;';
+  btn.title = 'Toggle expand/collapse';
+  return btn;
+}
+
+function toggleNode(toggle, children) {
+  const isCollapsed = children.classList.toggle('collapsed');
+  toggle.classList.toggle('collapsed', isCollapsed);
+}
+
+function escapeKey(k) {
+  if (/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(k)) return '.' + k;
+  return '["' + k.replace(/"/g, '\\"') + '"]';
+}
+
+function escapeHTML(str) {
+  return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── Expand / Collapse ──
+function expandAll() {
+  treeContainer.querySelectorAll('.node-children.collapsed').forEach(function(el) {
+    el.classList.remove('collapsed');
+  });
+  treeContainer.querySelectorAll('.toggle-btn.collapsed').forEach(function(el) {
+    el.classList.remove('collapsed');
+  });
+}
+
+function collapseAll() {
+  treeContainer.querySelectorAll('.node-children:not(.collapsed)').forEach(function(el) {
+    el.classList.add('collapsed');
+  });
+  treeContainer.querySelectorAll('.toggle-btn:not(.collapsed)').forEach(function(el) {
+    el.classList.add('collapsed');
+  });
+}
+
+// ── Search ──
+function searchTree(query) {
+  // Clear previous
+  treeContainer.querySelectorAll('.search-match').forEach(function(el) {
+    el.classList.remove('search-match');
+  });
+  searchCountEl.textContent = '';
+
+  if (!query.trim()) return;
+
+  const q = query.toLowerCase();
+  let count = 0;
+
+  allNodes.forEach(function(node) {
+    const pathMatch = node.path.toLowerCase().includes(q);
+    let valueMatch = false;
+    if (node.value !== null && node.value !== undefined) {
+      valueMatch = String(node.value).toLowerCase().includes(q);
+    }
+    if (node.type === 'object' || node.type === 'array') {
+      // Match on type
+      if (node.type.includes(q)) valueMatch = true;
+    }
+    if (pathMatch || valueMatch) {
+      node.el.classList.add('search-match');
+      count++;
+      // Expand parents
+      expandPathTo(node.el);
+    }
+  });
+
+  searchCountEl.textContent = count > 0 ? count + ' found' : 'No matches';
+}
+
+function expandPathTo(el) {
+  let parent = el.parentElement;
+  while (parent && parent !== treeContainer) {
+    if (parent.classList && parent.classList.contains('node-children') && parent.classList.contains('collapsed')) {
+      parent.classList.remove('collapsed');
+      const prev = parent.previousElementSibling;
+      if (prev) {
+        const toggle = prev.querySelector('.toggle-btn');
+        if (toggle) toggle.classList.remove('collapsed');
+      }
+    }
+    parent = parent.parentElement;
+  }
+}
+
+// ── JSON Path Tooltip ──
+function setupTooltip() {
+  document.addEventListener('mouseover', function(e) {
+    const row = e.target.closest('.node-row');
+    if (row && row.dataset.path) {
+      pathTooltip.textContent = row.dataset.path;
+      pathTooltip.style.display = 'block';
+    }
+  });
+  document.addEventListener('mousemove', function(e) {
+    if (pathTooltip.style.display === 'block') {
+      pathTooltip.style.left = (e.clientX + 12) + 'px';
+      pathTooltip.style.top = (e.clientY - 30) + 'px';
+    }
+  });
+  document.addEventListener('mouseout', function(e) {
+    const row = e.target.closest('.node-row');
+    if (row) {
+      pathTooltip.style.display = 'none';
+    }
+  });
+}
+
+// ── Resizer ──
+function setupResizer() {
+  const resizer = document.getElementById('resizer');
+  const panelEditor = document.getElementById('panelEditor');
+  let startX, startWidth;
+
+  resizer.addEventListener('mousedown', function(e) {
+    startX = e.clientX;
+    startWidth = panelEditor.offsetWidth;
+    resizer.classList.add('active');
+    document.addEventListener('mousemove', onDrag);
+    document.addEventListener('mouseup', onStop);
+    e.preventDefault();
+  });
+
+  function onDrag(e) {
+    const diff = e.clientX - startX;
+    const newWidth = Math.max(200, Math.min(startWidth + diff, window.innerWidth - 300));
+    panelEditor.style.width = newWidth + 'px';
+  }
+
+  function onStop() {
+    resizer.classList.remove('active');
+    document.removeEventListener('mousemove', onDrag);
+    document.removeEventListener('mouseup', onStop);
+  }
+}
+
+// ── Keyboard ──
+function setupKeyboard() {
+  document.addEventListener('keydown', function(e) {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+      e.preventDefault();
+      visualize();
+    }
+  });
+  // Tab support in textarea
+  editor.addEventListener('keydown', function(e) {
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      const start = this.selectionStart;
+      const end = this.selectionEnd;
+      this.value = this.value.substring(0, start) + '  ' + this.value.substring(end);
+      this.selectionStart = this.selectionEnd = start + 2;
+    }
+  });
+}
+
+// ── Actions ──
+function beautify() {
+  const val = editor.value.trim();
+  if (!val) { toast('Editor is empty'); return; }
+  try {
+    const parsed = JSON.parse(val);
+    editor.value = JSON.stringify(parsed, null, 2);
+    onEditorChange();
+    toast('JSON beautified');
+  } catch (e) {
+    toast('Cannot beautify: invalid JSON');
+  }
+}
+
+function minify() {
+  const val = editor.value.trim();
+  if (!val) { toast('Editor is empty'); return; }
+  try {
+    const parsed = JSON.parse(val);
+    editor.value = JSON.stringify(parsed);
+    onEditorChange();
+    toast('JSON minified');
+  } catch (e) {
+    toast('Cannot minify: invalid JSON');
+  }
+}
+
+function copyJSON() {
+  const val = editor.value.trim();
+  if (!val) { toast('Editor is empty'); return; }
+  navigator.clipboard.writeText(val).then(function() {
+    toast('JSON copied to clipboard');
+  }).catch(function() {
+    // Fallback
+    editor.select();
+    document.execCommand('copy');
+    toast('JSON copied to clipboard');
+  });
+}
+
+function clearAll() {
+  editor.value = '';
+  currentJSON = null;
+  allNodes = [];
+  treeContainer.innerHTML = '<div class="empty-state"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/></svg><h3>No JSON Loaded</h3><p>Paste JSON in the editor panel and click Visualize to see the tree</p></div>';
+  setStatus('empty', 'Empty');
+  hideError();
+  searchInput.value = '';
+  searchCountEl.textContent = '';
+}
+
+function loadSample() {
+  editor.value = JSON.stringify(sampleData, null, 2);
+  onEditorChange();
+  visualize();
+  toast('Sample JSON loaded');
+}
+
+// ── Export PNG ──
+function exportPNG() {
+  if (!currentJSON && treeContainer.children.length === 0) {
+    toast('Nothing to export. Visualize JSON first.');
+    return;
+  }
+
+  // Use html-to-canvas approach via SVG foreignObject
+  const treeViewport = document.getElementById('treeViewport');
+  const clone = treeContainer.cloneNode(true);
+  clone.style.width = treeContainer.scrollWidth + 'px';
+  clone.style.background = '#0a0a0b';
+  clone.style.padding = '20px';
+  clone.style.position = 'absolute';
+  clone.style.left = '-9999px';
+
+  // Remove collapsed children and toggle buttons from clone for clean export
+  clone.querySelectorAll('.node-children.collapsed').forEach(function(el) {
+    // keep them hidden
+  });
+
+  document.body.appendChild(clone);
+
+  const width = clone.scrollWidth || 600;
+  const height = clone.scrollHeight || 400;
+
+  // Create canvas
+  const canvas = document.createElement('canvas');
+  const scale = 2;
+  canvas.width = (width + 40) * scale;
+  canvas.height = (height + 40) * scale;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(scale, scale);
+  ctx.fillStyle = '#0a0a0b';
+  ctx.fillRect(0, 0, width + 40, height + 40);
+
+  // Use svg foreignObject
+  const data = '<svg xmlns="http://www.w3.org/2000/svg" width="' + (width + 40) + '" height="' + (height + 40) + '"><foreignObject width="100%" height="100%"><div xmlns="http://www.w3.org/1999/xhtml" style="padding:20px;background:#0a0a0b;color:#e4e4e7;font-family:-apple-system,BlinkMacSystemFont,sans-serif;font-size:12px;">' + serializeForSVG(clone) + '</div></foreignObject></svg>';
+
+  document.body.removeChild(clone);
+
+  const img = new Image();
+  img.onload = function() {
+    ctx.drawImage(img, 0, 0, width + 40, height + 40);
+
+    // Add watermark
+    ctx.fillStyle = 'rgba(109,90,255,0.4)';
+    ctx.font = '11px -apple-system, sans-serif';
+    ctx.fillText('JSONViz — jsonviz.dev', 12, height + 30);
+
+    canvas.toBlob(function(blob) {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'jsonviz-tree.png';
+      a.click();
+      URL.revokeObjectURL(url);
+      toast('PNG exported successfully');
+    }, 'image/png');
+  };
+  img.onerror = function() {
+    // Fallback: just download SVG
+    toast('PNG export failed in this browser. Try a different browser.');
+  };
+  img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(data);
+}
+
+function serializeForSVG(el) {
+  // Simple serialization with inline styles
+  let html = el.innerHTML;
+  // Escape for SVG
+  html = html.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  // Re-enable tags (hacky but works for our controlled content)
+  html = html.replace(/&lt;(\/?)(span|div|button|svg|path|circle|rect|g|text|br)([^&]*?)&gt;/g, function(match, slash, tag, attrs) {
+    return '<' + slash + tag + attrs + '>';
+  });
+  return html;
+}
+
+// ── Mobile ──
+function switchMobileTab(tab) {
+  const main = document.getElementById('mainArea');
+  const tabs = document.querySelectorAll('#mobileTabs button');
+  tabs.forEach(function(t) {
+    t.classList.toggle('active', t.dataset.tab === tab);
+  });
+  if (tab === 'tree') {
+    main.classList.add('mobile-tree');
+  } else {
+    main.classList.remove('mobile-tree');
+  }
+}
+
+// ── Toast ──
+function toast(msg) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  clearTimeout(el._timer);
+  el._timer = setTimeout(function() {
+    el.classList.remove('show');
+  }, 2500);
+}
+
+// ── Init ──
+init();
+// Show empty state
+treeContainer.innerHTML = '<div class="empty-state"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><path d="M14 2v6h6"/></svg><h3>No JSON Loaded</h3><p>Paste JSON in the editor panel and click Visualize to see the tree</p></div>';
+</script>
+</body>
+</html>
